@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<title>AppBebidas - Painel de Gestão</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+  body { background: #1C1C1C; color: #fff; min-height: 100vh; }
+  header { background: #F5C800; padding: 20px 30px; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { color: #412402; font-size: 22px; }
+  header span { color: #633806; font-size: 13px; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 30px; }
+  .tabs { display: flex; gap: 10px; margin-bottom: 24px; }
+  .tab { padding: 10px 20px; background: #2C2C2C; border: none; border-radius: 10px; color: #aaa; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .tab.active { background: #F5C800; color: #412402; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .card-header h2 { font-size: 18px; }
+  .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
+  .stat { background: #2C2C2C; border-radius: 12px; padding: 18px; text-align: center; }
+  .stat .num { font-size: 26px; font-weight: 800; color: #F5C800; }
+  .stat .label { font-size: 12px; color: #aaa; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; background: #2C2C2C; border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 12px 14px; font-size: 13px; }
+  th { background: #3a3a3a; color: #F5C800; font-weight: 600; }
+  tr:not(:last-child) td { border-bottom: 1px solid #3a3a3a; }
+  .badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .badge.cerveja { background: #FAEEDA; color: #633806; }
+  .badge.vodka { background: #EEEDFE; color: #3C3489; }
+  .badge.whisky { background: #FAECE7; color: #993C1D; }
+  .badge.pendente { background: #FAEEDA; color: #BA7517; }
+  .badge.acaminho { background: #EEEDFE; color: #3C3489; }
+  .badge.entregue { background: #EAF3DE; color: #3B6D11; }
+  .btn-del { background: #E24B4A; border: none; color: #fff; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  .btn-del:hover { opacity: 0.85; }
+  .empty { text-align: center; padding: 40px; color: #777; }
+  .loading { text-align: center; padding: 40px; color: #888; }
+  .error-box { background: #2C2C2C; border: 1px solid #E24B4A; border-radius: 10px; padding: 16px; color: #ff9b9b; font-size: 13px; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🍺 AppBebidas — Painel de Gestão</h1>
+  </div>
+  <span id="status-conn">A ligar ao servidor...</span>
+</header>
+
+<div class="container">
+
+  <div id="error-msg"></div>
+
+  <div class="stat-row">
+    <div class="stat"><div class="num" id="stat-produtos">-</div><div class="label">Produtos</div></div>
+    <div class="stat"><div class="num" id="stat-pedidos">-</div><div class="label">Pedidos</div></div>
+    <div class="stat"><div class="num" id="stat-receita">-</div><div class="label">Receita Total</div></div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="produtos" onclick="switchTab('produtos')">Produtos</button>
+    <button class="tab" data-tab="pedidos" onclick="switchTab('pedidos')">Pedidos</button>
+  </div>
+
+  <div class="panel active" id="panel-produtos">
+    <div class="card-header"><h2>Catálogo de Produtos</h2></div>
+    <div id="produtos-content" class="loading">A carregar produtos...</div>
+  </div>
+
+  <div class="panel" id="panel-pedidos">
+    <div class="card-header"><h2>Pedidos Recebidos</h2></div>
+    <div id="pedidos-content" class="loading">Faz login na app e os teus pedidos vão aparecer aqui.</div>
+  </div>
+
+</div>
+
+<script>
+const API_URL = 'http://localhost:5000/api';
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + tab).classList.add('active');
+}
+
+function badgeClass(cat) {
+  return cat;
+}
+
+function statusBadge(status) {
+  const map = { 'pendente': 'pendente', 'a caminho': 'acaminho', 'entregue': 'entregue' };
+  return map[status] || 'pendente';
+}
+
+async function carregarProdutos() {
+  try {
+    const res = await fetch(`${API_URL}/produtos`);
+    if (!res.ok) throw new Error('Erro ao buscar produtos');
+    const produtos = await res.json();
+
+    document.getElementById('stat-produtos').textContent = produtos.length;
+    document.getElementById('status-conn').textContent = '🟢 Ligado ao backend';
+
+    if (produtos.length === 0) {
+      document.getElementById('produtos-content').innerHTML = '<div class="empty">Nenhum produto encontrado. Corre o seed.js no backend.</div>';
+      return;
+    }
+
+    let html = '<table><thead><tr><th>Nome</th><th>Categoria</th><th>Preço</th><th>Detalhes</th><th></th></tr></thead><tbody>';
+    produtos.forEach(p => {
+      html += `<tr>
+        <td>${p.nome}</td>
+        <td><span class="badge ${badgeClass(p.categoria)}">${p.categoria}</span></td>
+        <td>${p.preco.toFixed(2)}€</td>
+        <td>${p.sub || '-'}</td>
+        <td><button class="btn-del" onclick="apagarProduto('${p._id}')">Apagar</button></td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('produtos-content').innerHTML = html;
+  } catch (err) {
+    document.getElementById('status-conn').textContent = '🔴 Servidor offline';
+    document.getElementById('error-msg').innerHTML = `<div class="error-box">Não foi possível ligar ao backend em ${API_URL}. Confirma que o servidor está a correr (node server.js).</div>`;
+    document.getElementById('produtos-content').innerHTML = '<div class="empty">Sem ligação ao servidor.</div>';
+  }
+}
+
+async function apagarProduto(id) {
+  if (!confirm('Tens a certeza que queres apagar este produto?')) return;
+  try {
+    await fetch(`${API_URL}/produtos/${id}`, { method: 'DELETE' });
+    carregarProdutos();
+  } catch (err) {
+    alert('Erro ao apagar produto');
+  }
+}
+
+// Pedidos requerem autenticação (token), por isso pedimos para colar um token de teste
+// ou simplesmente mostramos que a rota existe e é protegida.
+async function carregarPedidos() {
+  const token = localStorage.getItem('admin_token');
+  if (!token) {
+    document.getElementById('pedidos-content').innerHTML = `
+      <div class="empty">
+        Esta rota requer autenticação (JWT).<br><br>
+        Faz login na app, copia o token (ou usa a conta de teste) e cola aqui:<br><br>
+        <input id="token-input" placeholder="Cola o token JWT aqui" style="padding:8px;width:60%;border-radius:6px;border:none;margin-right:8px;">
+        <button class="tab" style="display:inline-block" onclick="guardarToken()">Ver pedidos</button>
+      </div>`;
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_URL}/pedidos`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error();
+    const pedidos = await res.json();
+
+    document.getElementById('stat-pedidos').textContent = pedidos.length;
+    const receita = pedidos.reduce((a, p) => a + p.total, 0);
+    document.getElementById('stat-receita').textContent = receita.toFixed(2) + '€';
+
+    if (pedidos.length === 0) {
+      document.getElementById('pedidos-content').innerHTML = '<div class="empty">Ainda não há pedidos.</div>';
+      return;
+    }
+
+    let html = '<table><thead><tr><th>Data</th><th>Itens</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>';
+    pedidos.forEach(p => {
+      const data = new Date(p.createdAt).toLocaleString('pt-PT');
+      const itens = p.itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ');
+      html += `<tr>
+        <td>${data}</td>
+        <td>${itens}</td>
+        <td>${p.total.toFixed(2)}€</td>
+        <td><span class="badge ${statusBadge(p.status)}">${p.status}</span></td>
+        <td><button class="btn-del" onclick="apagarPedido('${p._id}')">Cancelar</button></td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('pedidos-content').innerHTML = html;
+  } catch (err) {
+    localStorage.removeItem('admin_token');
+    document.getElementById('pedidos-content').innerHTML = '<div class="empty">Token inválido ou expirado. Tenta novamente.</div>';
+  }
+}
+
+function guardarToken() {
+  const token = document.getElementById('token-input').value.trim();
+  if (token) {
+    localStorage.setItem('admin_token', token);
+    carregarPedidos();
+  }
+}
+
+async function apagarPedido(id) {
+  if (!confirm('Cancelar este pedido?')) return;
+  const token = localStorage.getItem('admin_token');
+  try {
+    await fetch(`${API_URL}/pedidos/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    carregarPedidos();
+  } catch (err) {
+    alert('Erro ao cancelar pedido');
+  }
+}
+
+carregarProdutos();
+carregarPedidos();
+</script>
+
+</body>
+</html>
